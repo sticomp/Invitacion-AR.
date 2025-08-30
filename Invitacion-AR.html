@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Invitación de Cumpleaños AR</title>
+  <style>
+    /* Estilos del tema y la tipografía */
+    :root {
+      --accent: #ff3b7b;
+      --bg: #0b0b0b;
+      --card: #ffffffee;
+      --shadow-color: rgba(255, 59, 123, 0.4);
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+      overscroll-behavior: none; /* Previene el rebote en iOS */
+    }
+    #app {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: #000;
+      overflow: hidden;
+    }
+    #fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      background-color: #000;
+    }
+    #fallback video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Efecto espejo en la cámara frontal */
+    }
+    #overlayUI {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      display: none; /* Oculto por defecto, se muestra con JS */
+      z-index: 10;
+    }
+    /* Componentes UI */
+    .topbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    .pill {
+      pointer-events: auto;
+      background: #111a;
+      backdrop-filter: blur(4px);
+      color: #fff;
+      border: 1px solid #fff2;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      pointer-events: auto;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 700;
+      box-shadow: 0 6px 18px var(--shadow-color);
+      transition: transform .1s ease, box-shadow .2s ease;
+      cursor: pointer;
+    }
+    .btn:hover {
+      box-shadow: 0 8px 24px var(--shadow-color);
+    }
+    .btn:active {
+      transform: scale(.98);
+      box-shadow: 0 4px 12px var(--shadow-color);
+    }
+    .controls {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    .hint {
+      position: absolute;
+      left: 50%;
+      bottom: 90px;
+      transform: translateX(-50%);
+      background: #111a;
+      color: #fff;
+      border: 1px solid #fff2;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 13px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    .hint.visible {
+      opacity: 1;
+    }
+    canvas.webgl {
+      display: block;
+      position: fixed;
+      inset: 0;
+    }
+    .badge {
+      background: #fff;
+      color: #000;
+      border-radius: 10px;
+      padding: 4px 10px;
+      font-weight: 700;
+    }
+    .message-box {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #333d;
+      backdrop-filter: blur(8px);
+      color: #fff;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      max-width: 80%;
+      z-index: 20;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translate(-50%, -40%); }
+      to { opacity: 1; transform: translate(-50%, -50%); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- El canvas de Three.js se inyecta aquí -->
+    <div id="overlayUI" aria-hidden="false">
+      <div class="topbar">
+        <div class="pill">🎉 Invitación AR — toca la pantalla para colocar el cartel</div>
+        <button id="resetBtn" class="btn" type="button">Reiniciar</button>
+      </div>
+      <div class="hint" id="hint">Mové el teléfono para detectar una superficie...</div>
+      <div class="controls">
+        <button id="mapBtn" class="btn" type="button">📍 Mapa</button>
+        <button id="rsvpBtn" class="btn" type="button">✅ Confirmar</button>
+      </div>
+    </div>
+
+    <!-- Fallback (sin WebXR): cámara + tarjeta flotante 2.5D -->
+    <div id="fallback">
+      <video id="cam" autoplay playsinline></video>
+      <div id="fakeCard" style="position:absolute;left:50%;top:45%;transform:translate(-50%,-50%) rotateX(12deg);background:var(--card);border-radius:20px;padding:18px 20px;width:min(86vw,540px);box-shadow:0 24px 60px #0008;">
+        <div style="display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:8px">
+          <span class="badge">CUMPLE</span>
+          <strong style="font-size:18px;color:#111">¡Estás invitado/a!</strong>
+        </div>
+        <h2 id="titleText" style="margin:6px 0 0;font-size:26px;color:#111">Cumple de Sofía</h2>
+        <p id="subtitleText" style="margin:6px 0 10px;color:#333">¡Vení a celebrar conmigo! 🎂</p>
+        <p id="detailsText" style="margin:0;color:#333;line-height:1.4">Sábado 15 de Septiembre — 17:00 hs<br>Salón Alegría · Av. Principal 123</p>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+          <button id="mapBtn2" class="btn" type="button">📍 Mapa</button>
+          <button id="rsvpBtn2" class="btn" type="button">✅ Confirmar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mensaje de error personalizado -->
+    <div id="messageBox" class="message-box" style="display:none;"></div>
+  </div>
+
+  <!-- Three.js desde CDN -->
+  <script type="module">
+    // ======== CONFIGURACIÓN PERSONALIZABLE ========
+    const INVITACION = {
+      titulo: 'Cumple de Sofía',
+      subtitulo: '¡Vení a celebrar conmigo! 🎂',
+      detalles: 'Sábado 15 de Septiembre — 17:00 hs\nSalón Alegría · Av. Principal 123',
+      mapaURL: 'https://maps.google.com/?q=Salón+Alegría,+Av+Principal+123',
+      rsvpURL: 'https://wa.me/5491123456789?text=¡Confirmo%20mi%20asistencia%20al%20cumple!'
+    };
+    
+    // El audio ha sido removido para reducir el tamaño del archivo y mejorar el rendimiento.
+    // En un entorno de producción, se recomienda usar un archivo de audio externo.
+    // const audioDing = new Audio('ruta/a/tu/sonido.mp3');
+
+    // ======== UTILS Y MANEJADORES DE EVENTOS ========
+    const $ = (q) => document.querySelector(q);
+    const $$ = (q) => document.querySelectorAll(q);
+
+    // Muestra un mensaje personalizado en la pantalla en lugar de usar alert()
+    function showMessage(text) {
+        const msgBox = $('#messageBox');
+        msgBox.textContent = text;
+        msgBox.style.display = 'block';
+        // Ocultar el mensaje después de 5 segundos
+        setTimeout(() => msgBox.style.display = 'none', 5000);
+    }
+
+    // Handlers para los botones, funcionan en ambos modos (AR y fallback)
+    const openMap = () => window.open(INVITACION.mapaURL, '_blank');
+    const openRSVP = () => window.open(INVITACION.rsvpURL, '_blank');
+    
+    // Asigna los eventos a los botones
+    $('#mapBtn').onclick = openMap;
+    $('#rsvpBtn').onclick = openRSVP;
+    $('#mapBtn2').onclick = openMap;
+    $('#rsvpBtn2').onclick = openRSVP;
+
+    // Autocompleta los textos en el modo fallback
+    $('#titleText').textContent = INVITACION.titulo;
+    $('#subtitleText').textContent = INVITACION.subtitulo;
+    $('#detailsText').innerHTML = INVITACION.detalles.replace(/\n/g, '<br>');
+
+    // ======== LÓGICA DE INICIALIZACIÓN ========
+    async function init() {
+      // Primero, detecta si el navegador soporta WebXR AR
+      const supportsAR = await navigator.xr?.isSessionSupported('immersive-ar');
+
+      if (supportsAR) {
+        setupAR();
+      } else {
+        setupFallback();
+      }
+    }
+    
+    // Inicia la aplicación
+    window.addEventListener('load', init);
+
+    // ======== MODO ALTERNATIVO (FALLBACK) ========
+    async function setupFallback() {
+        const fallbackUI = $('#fallback');
+        fallbackUI.style.display = 'block';
+        $('#overlayUI').style.display = 'none';
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            const v = $('#cam');
+            v.srcObject = stream;
+        } catch (e) {
+            console.error('No se pudo acceder a la cámara.', e);
+            showMessage('No se pudo acceder a la cámara. Verificá los permisos del navegador.');
+        }
+
+        const card = $('#fakeCard');
+        let time = 0;
+        function loop() {
+            time += 0.016;
+            card.style.transform = `translate(-50%,-50%) rotateX(12deg) translateY(${Math.sin(time) * 6}px)`;
+            requestAnimationFrame(loop);
+        }
+        loop();
+    }
+
+    // ======== MODO AR REAL (WebXR + Three.js) ========
+    async function setupAR() {
+      // Importa las librerías necesarias de Three.js
+      const three = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js');
+
+      // Configura la escena y el renderer
+      const renderer = new three.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.domElement.className = 'webgl';
+      document.body.appendChild(renderer.domElement);
+      
+      const scene = new three.Scene();
+      const camera = new three.PerspectiveCamera();
+      
+      // Muestra la UI del modo AR
+      $('#overlayUI').style.display = 'block';
+
+      // Añade iluminación a la escena
+      const light = new three.HemisphereLight(0xffffff, 0x222233, 1.1);
+      scene.add(light);
+      
+      // Crea la retícula de detección de superficie
+      const reticle = new three.Mesh(
+        new three.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+        new three.MeshBasicMaterial({ color: 0xffffff, opacity: 0.9, transparent: true })
+      );
+      reticle.matrixAutoUpdate = false;
+      reticle.visible = false;
+      scene.add(reticle);
+      
+      // Crea la textura del cartel
+      const makeCardTexture = () => {
+        const c = document.createElement('canvas');
+        c.width = 1024;
+        c.height = 640;
+        const ctx = c.getContext('2d');
+        
+        // Fondo con borde redondeado
+        ctx.fillStyle = '#ffffffee';
+        const r = 40;
+        const w = c.width - 80;
+        const h = c.height - 80;
+        const x = 40;
+        const y = 40;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+        ctx.fill();
+
+        // Overlay suave
+        ctx.fillStyle = '#ffffffbb';
+        ctx.fillRect(x, y, w, h);
+
+        // Confeti dinámico
+        for (let i = 0; i < 120; i++) {
+          ctx.fillStyle = `hsl(${(i * 37) % 360}, 90%, 55%)`;
+          ctx.fillRect(Math.random() * c.width, Math.random() * c.height, 6, 18);
+        }
+
+        // Texto de la invitación
+        ctx.fillStyle = '#111';
+        ctx.font = 'bold 64px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('¡Estás invitado/a!', c.width / 2, 190);
+        
+        ctx.fillStyle = '#ff3b7b';
+        ctx.font = 'bold 72px system-ui';
+        ctx.fillText(INVITACION.titulo, c.width / 2, 290);
+        
+        ctx.fillStyle = '#333';
+        ctx.font = '48px system-ui';
+        INVITACION.detalles.split('\n').forEach((line, i) => {
+          ctx.fillText(line, c.width / 2, 380 + i * 64);
+        });
+        
+        return new three.CanvasTexture(c);
+      };
+      
+      const cardTex = makeCardTexture();
+      const cardGeo = new three.PlaneGeometry(0.9, 0.56);
+      const cardMat = new three.MeshStandardMaterial({ map: cardTex, transparent: true });
+      const card = new three.Mesh(cardGeo, cardMat);
+      card.visible = false;
+      scene.add(card);
+      
+      // Sombra falsa para el cartel
+      const shadow = new three.Mesh(
+        new three.CircleGeometry(0.35, 32).rotateX(-Math.PI / 2),
+        new three.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 })
+      );
+      shadow.visible = false;
+      scene.add(shadow);
+      
+      // Maneja la redimensión de la ventana
+      window.addEventListener('resize', () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+      
+      // Inicia la sesión de XR
+      const session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test', 'dom-overlay'],
+        domOverlay: { root: document.body }
+      });
+      renderer.xr.setSession(session);
+      
+      let xrRefSpace, viewerSpace, hitTestSource;
+      xrRefSpace = await session.requestReferenceSpace('local');
+      viewerSpace = await session.requestReferenceSpace('viewer');
+      hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+      
+      // Lógica de "tap to place"
+      const placeCard = () => {
+        if (!reticle.visible) return;
+        card.position.setFromMatrixPosition(reticle.matrix);
+        card.quaternion.setFromRotationMatrix(reticle.matrix);
+        
+        // Ajusta la posición y rotación del cartel
+        card.position.y += 0.05;
+        card.lookAt(camera.position.x, card.position.y, camera.position.z);
+        card.visible = true;
+        
+        // Mueve la sombra
+        shadow.position.copy(card.position);
+        shadow.visible = true;
+        
+        // Oculta el hint de la UI
+        $('#hint').classList.remove('visible');
+      };
+      
+      // Evento para colocar el cartel con un tap
+      document.body.addEventListener('click', placeCard);
+      
+      // Botón para reiniciar la escena
+      $('#resetBtn').onclick = () => {
+        card.visible = false;
+        shadow.visible = false;
+        $('#hint').classList.add('visible');
+      };
+      
+      // Bucle de animación
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          const results = frame.getHitTestResults(hitTestSource);
+          if (results.length) {
+            const hit = results[0];
+            const hitPose = hit.getPose(xrRefSpace);
+            reticle.visible = true;
+            reticle.matrix.fromArray(hitPose.transform.matrix);
+            $('#hint').classList.add('visible');
+          } else {
+            reticle.visible = false;
+            $('#hint').classList.remove('visible');
+          }
+        }
+        
+        // Animación de "flotación" para el cartel colocado
+        if (card.visible) {
+          card.position.y += Math.sin(time / 1000) * 0.0009;
+        }
+        
+        renderer.render(scene, camera);
+      });
+    }
+  </script>
+</body>
+</html>
